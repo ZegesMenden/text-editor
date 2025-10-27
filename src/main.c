@@ -30,10 +30,13 @@ int main(int argc, char** argv) {
     long file_size = ftell(fptr);
     rewind(fptr);
 
-    char* strbuf = (char*)calloc(sizeof(char), file_size);
+    // Allocate an extra byte and NUL-terminate to make strlen-safe consumers happy
+    char* strbuf = (char*)calloc(sizeof(char), (size_t)file_size + 1);
     if ( strbuf == NULL ) { return 1; }
 
-    size_t bytes_read = fread(strbuf, 1, file_size, fptr);
+    size_t bytes_read = fread(strbuf, 1, (size_t)file_size, fptr);
+    (void)bytes_read; // bytes_read may be less than file_size; buffer remains NUL-terminated
+    strbuf[file_size] = '\0';
 
     fclose(fptr);
 

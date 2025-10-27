@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include "textErr.h"
 
-typedef struct {
+typedef struct linebuf {
 
     struct linebuf* prev;
     struct linebuf* next;
@@ -44,7 +44,7 @@ typedef struct {
     linebuf* lines;
     viewbuf* view;
 
-    char* fname;
+    const char* fname;
 
 } filebuf;
 
@@ -55,9 +55,9 @@ textErr linebuf_init(linebuf** inst, const char* src, size_t strsize);
 textErr linebuf_parse(linebuf** inst, const char* src, size_t maxlines, size_t *charcount);
 
 textErr viewbuf_init(viewbuf** inst, linebuf* head, size_t maxlines);
-textErr viewbuf_resize(viewbuf** inst, size_t newlines);
 
 textErr filebuf_init(filebuf** inst, size_t viewlines);
 textErr filebuf_load(filebuf** inst, const char* filedata, const char* fname, size_t initline);
+textErr filebuf_resize(filebuf** inst);
 
 #endif /* TEXTMAN_H */

@@ -46,6 +46,15 @@ textErr windowman_render(windowman_t* ctx, filebuf* fbuf) {
     ctx->win_height = _h;
     ctx->win_width = _w;
 
+    // clear();
+    if (fbuf->viewlines != ctx->win_height - 2) { clear(); }
+
+    fbuf->viewlines = ctx->win_height - 2;
+    textErr ret = filebuf_resize(&fbuf);
+    if ( ret != ERR_NONE ) { 
+        return ret;
+    }
+
     ctx->cursor_y = getcury(stdscr);
     ctx->cursor_x = getcurx(stdscr);
 
@@ -56,6 +65,7 @@ textErr windowman_render(windowman_t* ctx, filebuf* fbuf) {
     nodelay(stdscr, TRUE);
     int ch = getch();
     const int keypress = ch == ERR ? -1 : ch;
+    (void)keypress; // silence unused warning for now
     nodelay(stdscr, FALSE);
 
     // LINES / SPACERS
@@ -65,38 +75,39 @@ textErr windowman_render(windowman_t* ctx, filebuf* fbuf) {
 
     // Vertical LOC line
 
-    int maxloc = fbuf->view->headline + fbuf->viewlines;
+    int maxloc = (int)(fbuf->view->headline + fbuf->viewlines);
     int digits = 0;
-    while ( maxloc > 0 ) {
+    do {
         maxloc /= 10;
         digits += 1;
-    }
+    } while ( maxloc > 0 );
 
     mvvline(2, digits+1, ACS_VLINE, ctx->win_height-2);
 
-    // Write line numbers
-
-    // for ( int i = 2; i < ctx->win_height; i++ ) {
-    //     mvprintw(i, 0, "%ld", fbuf->view->headline+i);
-    // }
-
-    // Write the text
+    // Write text and line numbers
 
     int lineno = 0;
     int lineposition = 0;
 
-    linebuf* cur = fbuf->lines;
+    linebuf* cur = fbuf->view->head;
     while ( cur != NULL ) {
+        if (lineposition >= (int)(ctx->win_height - 2)) { break; }
 
-        mvprintw(lineposition+2, 0, "%ld", fbuf->view->headline+lineno);
+        mvprintw(lineposition+2, 0, "%zu", fbuf->view->headline+lineno);
 
-        if ( strlen(cur->line) < ctx->win_width-3 ) {
-            mvprintw(lineposition+2, digits+2, cur->line);
-            lineno += 1;
-        } else {
-            
+        // compute printable length excluding trailing newline to avoid moving the cursor
+        size_t plen = cur->len;
+        if ( plen > 0 && cur->line[plen-1] == '\n' ) { plen -= 1; }
+
+        // clip to available width
+        size_t max_text = (ctx->win_width > (size_t)(digits+2)) ? (ctx->win_width - (size_t)(digits+2)) : 0;
+        size_t to_print = (plen < max_text) ? plen : max_text;
+
+        if (to_print > 0) {
+            mvprintw(lineposition+2, digits+2, "%.*s", (int)to_print, cur->line);
         }
 
+        lineno += 1;
         cur = cur->next;
         lineposition += 1;
 
