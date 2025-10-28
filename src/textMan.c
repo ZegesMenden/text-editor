@@ -138,7 +138,7 @@ textErr filebuf_init(filebuf** inst, size_t viewlines) {
 
 }
 
-textErr filebuf_load(filebuf** inst, const char* filedata, const char* fname, size_t initline) {
+textErr filebuf_load(filebuf** inst, const char* filedata, const char* fname) {
     #define ref (*inst)
 
     if ( inst == NULL ) { return ERR_NULL; }
@@ -164,21 +164,6 @@ textErr filebuf_load(filebuf** inst, const char* filedata, const char* fname, si
 
     const char* fileptr = filedata;
 
-    // add lines to prewindow
-    for ( int i = 0; i < initline; i++ ) {
-
-        // linesize+1 so the newline is captured
-        size_t copy_size = 0;
-        textErr ret = linesize(fileptr, &copy_size);
-        if ( ret != ERR_NONE && ret != ERR_EOF ) { return ret; }
-        if ( ret == ERR_NONE ) { copy_size += 1; }
-        memcpy(&ref->prewindow[ref->prewindow_len], fileptr, copy_size);
-        fileptr += copy_size;
-
-        ref->prewindow_len += copy_size;
-
-    }
-
     textErr ret;
 
     // add lines to window
@@ -191,7 +176,7 @@ textErr filebuf_load(filebuf** inst, const char* filedata, const char* fname, si
 
     // Initialize view to parsed lines
     ref->view->head = ref->lines;
-    ref->view->headline = initline + 1; // 1-based line number at top
+    ref->view->headline = 1;
 
     // Count how many lines parsed to set view->lines
     size_t parsed_lines = 0;
@@ -204,10 +189,14 @@ textErr filebuf_load(filebuf** inst, const char* filedata, const char* fname, si
     }
     ref->view->lines = parsed_lines;
 
-    // add remaining bytes to postwindow in forward order (exclude final NUL)
+    // add remaining bytes to postwindow in reverse order
     size_t remaining = (usedchars <= data_len) ? (data_len - usedchars) : 0;
     if ( remaining > 0 ) {
-        memcpy(&ref->postwindow[0], fileptr, remaining);
+
+        for (size_t i = 0; i < remaining; i++) {
+            ref->postwindow[i] = fileptr[filesize - 1 - i];
+        }
+
     }
     ref->postwindow_len = remaining;
     
@@ -220,7 +209,7 @@ textErr filebuf_consume_prewindow_line(filebuf** inst) {
     #define ref (*inst)
     if ( inst == NULL ) { return ERR_NULL; }
 
-    if ( ref->prewindow_len == 0 ) { return ERR_NONE; }
+    if ( ref->prewindow_len == 0 ) { return ERR_EOF; }
 
     // Find the start of the last complete line in prewindow
     size_t end = ref->prewindow_len; // exclusive
@@ -262,26 +251,33 @@ textErr filebuf_consume_postwindow_line(filebuf** inst) {
     #define ref (*inst)
     if ( inst == NULL ) { return ERR_NULL; }
 
-    if ( ref->postwindow_len == 0 ) { return ERR_NONE; }
+    if ( ref->postwindow_len == 0 ) { return ERR_EOF; }
 
-    size_t copycount = 0;
-    for ( size_t i = 0; i < ref->postwindow_len; i++ ) {
+    size_t copycount = 1;
+    for ( size_t i = ref->postwindow_len - 2; i > 0; i-- ) {
         copycount += 1;
         if ( ref->postwindow[i] == '\n' ) { break; }
     }
 
-    linebuf* newhead = NULL;
-    textErr ret = linebuf_init(&newhead, &ref->postwindow[0], copycount);
+    linebuf* newtail = NULL;
+    textErr ret = linebuf_init(&newtail, NULL, 0);
     if ( ret != ERR_NONE ) { return ret; }
 
-    newhead->prev = NULL;
-    newhead->next = (struct linebuf*)ref->view->head;
-    if ( ref->view->head != NULL ) {
-        ((linebuf*)(ref->view->head))->prev = (struct linebuf*)newhead;
+    linebuf* tail = ref->view->head;
+    while (tail && tail->next) {
+        tail = (linebuf*)tail->next;
     }
-    ref->view->head = newhead;
 
-    memmove(&ref->postwindow[0], &ref->postwindow[copycount], ref->postwindow_len - copycount);
+    newtail->prev = tail;
+    newtail->next = NULL;
+    tail->next = newtail;
+
+    newtail->line = (char*)malloc(copycount+1);
+    newtail->len = copycount;
+
+    for ( int i = 0; i < copycount; i++ ) {
+        newtail->line[i] = ref->postwindow[ref->postwindow_len-1-i];
+    }
     ref->postwindow_len -= copycount;
 
     ref->view->lines += 1;
@@ -330,8 +326,11 @@ textErr filebuf_return_postwindow_line(filebuf** inst) {
     }
 
     size_t linelen = oldhead->len;
-    memmove(&ref->postwindow[linelen], &ref->postwindow[0], ref->postwindow_len);
-    memcpy(&ref->postwindow[0], oldhead->line, linelen);
+    for (size_t i = 0; i < linelen; i++) {
+        ref->postwindow[i] = oldhead->line[linelen - 1 - i];
+    }
+    // memmove(&ref->postwindow[linelen], &ref->postwindow[0], ref->postwindow_len);
+    // memcpy(&ref->postwindow[0], oldhead->line, linelen);
     ref->postwindow_len += linelen;
 
     free(oldhead->line);
@@ -363,6 +362,38 @@ textErr filebuf_resize(filebuf** inst) {
         textErr ret = filebuf_return_postwindow_line(inst);
         if ( ret != ERR_NONE ) { return ret; }
     }
+
+    return ERR_NONE;
+
+}
+
+textErr filebuf_scroll_down(filebuf** inst) {
+
+    #define ref (*inst)
+    if ( inst == NULL ) { return ERR_NULL; }
+    if ( ref->view->head == NULL ) { return ERR_NULL; }
+
+    textErr ret = filebuf_consume_postwindow_line(inst);
+    if ( ret != ERR_NONE ) { return ret; }
+
+    ret = filebuf_return_prewindow_line(inst);
+    if ( ret != ERR_NONE ) { return ret; }
+
+    return ERR_NONE;
+
+}
+
+textErr filebuf_scroll_up(filebuf** inst) {
+
+    #define ref (*inst)
+    if ( inst == NULL ) { return ERR_NULL; }
+    if ( ref->view->head == NULL ) { return ERR_NULL; }
+
+    textErr ret = filebuf_consume_prewindow_line(inst);
+    if ( ret != ERR_NONE ) { return ret; }
+
+    ret = filebuf_return_postwindow_line(inst);
+    if ( ret != ERR_NONE ) { return ret; }
 
     return ERR_NONE;
 

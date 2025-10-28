@@ -41,13 +41,13 @@ int main(int argc, char** argv) {
     fclose(fptr);
 
     filebuf* file_ctx = NULL;
-    textErr ret = filebuf_init(&file_ctx, 8);
+    textErr ret = filebuf_init(&file_ctx, 1);
     if ( ret != ERR_NONE ) { 
         printf("Failed to initialize filebuf, reason: %s\n", textErr_tostr(ret));
         return 1;
     }
 
-    ret = filebuf_load(&file_ctx, strbuf, args.input_file, 0);
+    ret = filebuf_load(&file_ctx, strbuf, args.input_file);
     if ( ret != ERR_NONE ) { 
         printf("Failed to load data to filebuf, reason: %s\n", textErr_tostr(ret));
         return 1;

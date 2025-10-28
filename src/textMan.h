@@ -57,7 +57,10 @@ textErr linebuf_parse(linebuf** inst, const char* src, size_t maxlines, size_t *
 textErr viewbuf_init(viewbuf** inst, linebuf* head, size_t maxlines);
 
 textErr filebuf_init(filebuf** inst, size_t viewlines);
-textErr filebuf_load(filebuf** inst, const char* filedata, const char* fname, size_t initline);
+textErr filebuf_load(filebuf** inst, const char* filedata, const char* fname);
 textErr filebuf_resize(filebuf** inst);
+
+textErr filebuf_scroll_down(filebuf** inst);
+textErr filebuf_scroll_up(filebuf** inst);
 
 #endif /* TEXTMAN_H */
