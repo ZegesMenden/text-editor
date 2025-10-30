@@ -67,7 +67,7 @@ textErr windowman_render(windowman_t* ctx, filebuf* fbuf) {
     (void)keypress; // silence unused warning for now
     // nodelay(stdscr, FALSE);
 
-    mvprintw(0, 32, "keypress: %d", keypress);
+    if ( keypress != ERR ) { mvprintw(0, 32, "keypress: %03d", keypress); }
     mvprintw(0, 48, "cursor x: %ld y: %ld", ctx->cursor_x, ctx->cursor_y);
 
     // LINES / SPACERS
@@ -143,7 +143,7 @@ textErr windowman_render(windowman_t* ctx, filebuf* fbuf) {
 
     if ( keypress == KEY_RIGHT ) {
         ctx->cursor_x = ctx->cursor_x + 1;
-        if ( ctx->cursor_x >= linelen_lut[ctx->cursor_y] ) {
+        if ( ctx->cursor_x > linelen_lut[ctx->cursor_y] ) {
             if ( ctx->cursor_y < ctx->win_height-2 ) {
                 ctx->cursor_y += 1;
                 ctx->cursor_x = 0;
@@ -171,8 +171,8 @@ textErr windowman_render(windowman_t* ctx, filebuf* fbuf) {
             }
         }
         size_t max_x = linelen_lut[ctx->cursor_y];
-        if (ctx->cursor_x >= (int)max_x) {
-            ctx->cursor_x = (int)max_x-1;
+        if (ctx->cursor_x > (int)max_x) {
+            ctx->cursor_x = (int)max_x;
         }
     
     } else if ( keypress == KEY_UP ) {
@@ -187,13 +187,120 @@ textErr windowman_render(windowman_t* ctx, filebuf* fbuf) {
             }
         }
         size_t max_x = linelen_lut[ctx->cursor_y];
-        if (ctx->cursor_x >= (int)max_x) {
-            ctx->cursor_x = (int)max_x-1;
+        if (ctx->cursor_x > (int)max_x) {
+            ctx->cursor_x = (int)max_x;
         }
+    }
+
+    // calculate cursor index in buffer (for line manupulation)
+
+    size_t textposition = ctx->cursor_x;
+    if ( ctx->cursor_y > 0 ) {
+        for ( size_t i = ctx->cursor_y-1; i > 0; i-- ) {
+            if ( linebuf_lut[i] == linebuf_lut[ctx->cursor_y] ) {
+                textposition += (ctx->win_width - (size_t)(digits+2));
+            } else {
+                break;
+            }
+        }
+    }
+
+    // insert newline at character (yikes!)
+    if ( keypress == 10 ) {
+
+        mvprintw(0, 64, "enter!");
+
+        linebuf* newline;
+        ret = linebuf_init(&newline, &linebuf_lut[ctx->cursor_y]->line[textposition], linebuf_lut[ctx->cursor_y]->len-textposition);
+        if ( ret != ERR_NONE ) {
+            free(linebuf_lut);
+            free(linelen_lut);
+            return ret;
+        }
+
+        linebuf* next = linebuf_lut[ctx->cursor_y]->next;
+        linebuf_lut[ctx->cursor_y]->next = newline;
+        newline->prev = linebuf_lut[ctx->cursor_y];
+        newline->next = next;
+        next->prev = newline;
+
+        linebuf_lut[ctx->cursor_y]->len = textposition;
+        linebuf_lut[ctx->cursor_y]->line[textposition] = '\0';    
+        
+        fbuf->view->lines += 1;
+
+    }
+
+    if ( keypress == KEY_BACKSPACE || keypress == KEY_DL ) {
+
+        // shift text
+        memmove(&linebuf_lut[ctx->cursor_y]->line[textposition], &linebuf_lut[ctx->cursor_y]->line[textposition+1], linebuf_lut[ctx->cursor_y]->len-textposition);
+
+        // insert character
+        linebuf_lut[ctx->cursor_y]->len -= 1;
+
+        // ctx->cursor_x += 1;
+
+        if ( ctx->cursor_x == 0 && ctx->cursor_y > 0 ) {
+            ctx->cursor_x = linelen_lut[ctx->cursor_y-1]-1;
+            ctx->cursor_y -= 1;
+        } else if ( ctx->cursor_x > 0 ) { ctx->cursor_x = ctx->cursor_x - 1; }
+
+        if ( ctx->cursor_x > linelen_lut[ctx->cursor_y]-1 ) {
+            if ( ctx->cursor_y < ctx->win_height-2 ) {
+                ctx->cursor_y += 1;
+                ctx->cursor_x = 0;
+            } else {
+                ctx->cursor_x = linelen_lut[ctx->cursor_y]-1;
+            }
+        }
+        if ( ctx->cursor_x > ctx->win_width-5 ) { ctx->cursor_x = ctx->win_width-5; }
+
+
+
+    }
+
+    // Check if keypress is a typable character
+    if (keypress >= 32 && keypress <= 126) {
+
+        // reallocate memory
+        if ( linebuf_lut[ctx->cursor_y]->cap < linebuf_lut[ctx->cursor_y]->len+1 ) {
+            size_t newcap = linebuf_lut[ctx->cursor_y]->cap*2;
+            linebuf_lut[ctx->cursor_y]->line = realloc(linebuf_lut[ctx->cursor_y]->line, newcap);
+            if ( linebuf_lut[ctx->cursor_y]->line == NULL ) {
+                return ERR_MEM;
+            }
+            linebuf_lut[ctx->cursor_y]->cap = newcap;
+        }
+
+        // shift text
+        memmove(&linebuf_lut[ctx->cursor_y]->line[textposition+1], &linebuf_lut[ctx->cursor_y]->line[textposition], linebuf_lut[ctx->cursor_y]->len-textposition);
+
+        // insert character
+        linebuf_lut[ctx->cursor_y]->line[textposition] = (char)keypress;
+        linebuf_lut[ctx->cursor_y]->len += 1;
+
+        ctx->cursor_x += 1;
+
+        if ( ctx->cursor_x >= (ctx->win_width - (size_t)(digits+2)) ) {
+            if ( ctx->cursor_y < ctx->win_height-2 ) {
+                ctx->cursor_y += 1;
+                ctx->cursor_x = 0;
+            } else {
+                ctx->cursor_x = linelen_lut[ctx->cursor_y];
+            }
+        }
+
     }
 
     free(linelen_lut);
     free(linebuf_lut);
+
+    ret = viewbuf_remove_empty_lines(&fbuf->view);
+    if ( ret != ERR_NONE ) {
+        return ret;
+    }
+
 
     refresh();
 

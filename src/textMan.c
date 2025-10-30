@@ -35,6 +35,7 @@ textErr linebuf_init(linebuf** inst, const char* src, size_t strsize) {
         ref->line[strsize] = '\0';
         // length is the number of meaningful bytes (excluding the added NUL terminator)
         ref->len = strsize;
+        ref->cap = strsize;
     }
 
     return ERR_NONE;
@@ -120,6 +121,42 @@ textErr viewbuf_init(viewbuf** inst, linebuf* head, size_t maxlines) {
 
 }
 
+textErr viewbuf_remove_empty_lines(viewbuf** inst) {
+
+    #define ref (*inst)
+    if ( inst == NULL ) { return ERR_NULL; }
+    if ( ref == NULL ) { return ERR_NULL; }
+    
+    linebuf* node = ref->head;
+    if ( node == NULL ) { return ERR_NONE; }
+
+    while ( node ) {
+
+        linebuf* next = node->next;
+
+        if ( node->len == 0 ) {
+
+            if ( node->prev != NULL ) {
+                node->prev->next = node->next;
+            }
+
+            if ( node->next != NULL ) {
+                node->next->prev = node->prev;
+            }
+
+            free(node->line);
+            free(node);
+
+        }
+
+        node = next;
+
+    }
+
+    return ERR_NONE;
+
+}
+
 textErr filebuf_init(filebuf** inst, size_t viewlines) {
     #define ref (*inst)
     
@@ -166,40 +203,50 @@ textErr filebuf_load(filebuf** inst, const char* filedata, const char* fname) {
 
     textErr ret;
 
-    // add lines to window
-    size_t charcount = 0;
-    ret = linebuf_parse(&(ref->lines), fileptr, ref->viewlines, &charcount);
-    if ( ret != ERR_NONE ) { return ret; }
+    // // add lines to window
+    // size_t charcount = 0;
+    // ret = linebuf_parse(&(ref->lines), fileptr, ref->viewlines, &charcount);
+    // if ( ret != ERR_NONE ) { return ret; }
 
-    fileptr += charcount;
-    size_t usedchars = (uintptr_t)fileptr - (uintptr_t)filedata;
+    // fileptr += charcount;
+    // size_t usedchars = (uintptr_t)fileptr - (uintptr_t)filedata;
 
-    // Initialize view to parsed lines
-    ref->view->head = ref->lines;
-    ref->view->headline = 1;
+    // // Initialize view to parsed lines
+    // ref->view->head = ref->lines;
+    // ref->view->headline = 1;
 
-    // Count how many lines parsed to set view->lines
-    size_t parsed_lines = 0;
-    {
-        linebuf* cur = ref->lines;
-        while ( cur != NULL ) {
-            parsed_lines += 1;
-            cur = linebuf_next(cur);
-        }
-    }
-    ref->view->lines = parsed_lines;
+    // // Count how many lines parsed to set view->lines
+    // size_t parsed_lines = 0;
+    // {
+    //     linebuf* cur = ref->lines;
+    //     while ( cur != NULL ) {
+    //         parsed_lines += 1;
+    //         cur = linebuf_next(cur);
+    //     }
+    // }
+    // ref->view->lines = parsed_lines;
 
-    // add remaining bytes to postwindow in reverse order
-    size_t remaining = (usedchars <= data_len) ? (data_len - usedchars) : 0;
-    if ( remaining > 0 ) {
+    // // add remaining bytes to postwindow in reverse order
+    // size_t remaining = (usedchars <= data_len) ? (data_len - usedchars) : 0;
+    // if ( remaining > 0 ) {
 
-        for (size_t i = 0; i < remaining; i++) {
-            ref->postwindow[i] = fileptr[filesize - 1 - i];
-        }
+    //     for (size_t i = 0; i < remaining; i++) {
+    //         ref->postwindow[i] = fileptr[filesize - 1 - i];
+    //     }
 
-    }
-    ref->postwindow_len = remaining;
+    // }
+    // ref->postwindow_len = remaining;
     
+    for ( size_t i = 0; i < filesize; i++ ) {
+        ref->postwindow[filesize-1-i] = filedata[i];
+    }
+    ref->postwindow_len = filesize;
+
+    ret = filebuf_resize(inst);
+    if ( ret != ERR_NONE ) {
+        return ret;
+    }
+
     return ERR_NONE;
 
 }
@@ -230,7 +277,7 @@ textErr filebuf_consume_prewindow_line(filebuf** inst) {
     newhead->prev = NULL;
     newhead->next = (struct linebuf*)ref->view->head;
     if ( ref->view->head != NULL ) {
-        ((linebuf*)(ref->view->head))->prev = (struct linebuf*)newhead;
+        ref->view->head->prev = newhead;
     }
     ref->view->head = newhead;
 
@@ -253,8 +300,8 @@ textErr filebuf_consume_postwindow_line(filebuf** inst) {
 
     if ( ref->postwindow_len == 0 ) { return ERR_EOF; }
 
-    size_t copycount = 1;
-    for ( size_t i = ref->postwindow_len - 2; i > 0; i-- ) {
+    size_t copycount = 0;
+    for ( size_t i = ref->postwindow_len - 1; i > 0; i-- ) {
         copycount += 1;
         if ( ref->postwindow[i] == '\n' ) { break; }
     }
@@ -263,18 +310,35 @@ textErr filebuf_consume_postwindow_line(filebuf** inst) {
     textErr ret = linebuf_init(&newtail, NULL, 0);
     if ( ret != ERR_NONE ) { return ret; }
 
-    linebuf* tail = ref->view->head;
-    while (tail && tail->next) {
-        tail = (linebuf*)tail->next;
+    if ( ref->view->head == NULL ) {
+        ref->view->head = newtail;
+        newtail->prev = NULL;
+        newtail->next = NULL;
+    } else {
+
+        linebuf* tail = ref->view->head;
+        while (tail && tail->next) {
+            tail = (linebuf*)tail->next;
+        }
+
+        newtail->prev = tail;
+        newtail->next = NULL;
+        tail->next = newtail;
+
+        newtail->line = (char*)malloc(copycount+1);
+        newtail->len = copycount;
+        newtail->cap = copycount;
+
     }
 
-    newtail->prev = tail;
-    newtail->next = NULL;
-    tail->next = newtail;
+    newtail->line = calloc(copycount, 1);
+    if ( newtail->line == NULL ) {
+        return ERR_MEM;
+    }
 
-    newtail->line = (char*)malloc(copycount+1);
     newtail->len = copycount;
-
+    newtail->cap = copycount;
+    
     for ( int i = 0; i < copycount; i++ ) {
         newtail->line[i] = ref->postwindow[ref->postwindow_len-1-i];
     }
@@ -379,6 +443,8 @@ textErr filebuf_scroll_down(filebuf** inst) {
     ret = filebuf_return_prewindow_line(inst);
     if ( ret != ERR_NONE ) { return ret; }
 
+    ref->view->headline += 1;
+
     return ERR_NONE;
 
 }
@@ -394,6 +460,8 @@ textErr filebuf_scroll_up(filebuf** inst) {
 
     ret = filebuf_return_postwindow_line(inst);
     if ( ret != ERR_NONE ) { return ret; }
+
+    ref->view->headline -= 1;
 
     return ERR_NONE;
 

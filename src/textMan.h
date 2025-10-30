@@ -13,6 +13,7 @@ typedef struct linebuf {
 
     char* line;
     size_t len;
+    size_t cap;
 
 } linebuf;
 
@@ -55,6 +56,7 @@ textErr linebuf_init(linebuf** inst, const char* src, size_t strsize);
 textErr linebuf_parse(linebuf** inst, const char* src, size_t maxlines, size_t *charcount);
 
 textErr viewbuf_init(viewbuf** inst, linebuf* head, size_t maxlines);
+textErr viewbuf_remove_empty_lines(viewbuf** inst);
 
 textErr filebuf_init(filebuf** inst, size_t viewlines);
 textErr filebuf_load(filebuf** inst, const char* filedata, const char* fname);
